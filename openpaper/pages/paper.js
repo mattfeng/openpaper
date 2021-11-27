@@ -1,7 +1,8 @@
-import React, { Component } from "react";
+import React, { Component, useRef } from "react";
 import { Document, Page } from "react-pdf";
 import { pdfjs } from "react-pdf";
 pdfjs.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjs.version}/pdf.worker.min.js`;
+import axios from "axios";
 
 import "react-pdf/dist/esm/Page/AnnotationLayer.css";
 
@@ -38,11 +39,34 @@ const Annotation = ({ x, y }) => {
 
   return (
     <>
-      <div style={deleteBtn}>
-        <span>X</span>
-      </div>
       <div style={annoStyle}></div>
     </>
+  );
+};
+
+const NewAnnotationEditor = ({ submit, cancel }) => {
+  const titleRef = useRef(null);
+  const bodyRef = useRef(null);
+
+  return (
+    <div className={styles.newEditor}>
+      <h1>New annotation</h1>
+
+      <h2>Annotation title</h2>
+      <input ref={titleRef} type="text" />
+
+      <h2>Annotation body</h2>
+      <textarea ref={bodyRef}></textarea>
+
+      <div>
+        <button onClick={cancel}>Cancel</button>
+        <button
+          onClick={() => submit(titleRef.current.value, bodyRef.current.value)}
+        >
+          Save
+        </button>
+      </div>
+    </div>
   );
 };
 
@@ -55,8 +79,9 @@ class Paper extends Component {
       scale: 2.0,
       file: "./sample.pdf",
       numPages: null,
-      annotating: true,
+      annotating: false, // if currently creating an annotation
       annotations: [],
+      currentAnno: null,
     };
   }
 
@@ -97,10 +122,12 @@ class Paper extends Component {
 
     console.log(pageX, pageY);
 
-    if (annotating) {
-      const newAnnotations = annotations.concat({ x: pageX, y: pageY });
-
-      this.setState({ ...this.state, annotations: newAnnotations });
+    if (!annotating) {
+      this.setState({
+        ...this.state,
+        currentAnno: { x: pageX, y: pageY },
+        annotating: true,
+      });
     }
   };
 
@@ -108,8 +135,53 @@ class Paper extends Component {
     document.removeEventListener("click", this.handlePageClick);
   }
 
+  // TODO: fill with values
+  createNewAnnotation = async (title, body) => {
+    console.log("submitted");
+    // TODO: submit to server, update visuals when server responds
+
+    const form = new FormData();
+    form.append("x", this.state.currentAnno.x);
+    form.append("y", this.state.currentAnno.y);
+    form.append("title", title);
+    form.append("body", body);
+
+    try {
+      const resp = await axios({
+        method: "POST",
+        url: "http://localhost:5000/add",
+        data: form,
+        headers: { "Content-Type": "x-www-form-urlencoded" },
+      });
+      console.log(resp);
+      const newAnnotations = this.state.annotations.concat({
+        x: resp.data.x,
+        y: resp.data.y,
+      });
+
+      this.setState({
+        ...this.state,
+        annotating: false,
+        currentAnno: null,
+        annotations: newAnnotations,
+      });
+    } catch {
+      this.setState({
+        ...this.state,
+        annotating: false,
+        currentAnno: null,
+      });
+    }
+  };
+
+  cancelNewAnnotation = () => {
+    console.log("cancelled");
+    this.setState({ ...this.state, annotating: false, currentAnno: null });
+  };
+
   render() {
-    const { file, numPages, scale, annotations } = this.state;
+    const { file, numPages, scale, annotations, annotating, currentAnno } =
+      this.state;
 
     return (
       <div>
@@ -142,7 +214,17 @@ class Paper extends Component {
           {annotations.map((anno) => (
             <Annotation x={anno.x} y={anno.y} />
           ))}
+          {currentAnno ? (
+            <Annotation x={currentAnno.x} y={currentAnno.y} />
+          ) : null}
         </div>
+
+        {annotating ? (
+          <NewAnnotationEditor
+            cancel={() => this.cancelNewAnnotation()}
+            submit={(title, body) => this.createNewAnnotation(title, body)}
+          />
+        ) : null}
       </div>
     );
   }
